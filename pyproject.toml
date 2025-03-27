@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "s3lib"
+version = "0.0.1"
+authors = [
+  { name="Valery Utukin", email="valeryvumvum@gmail.com" },
+]
+description = "A wrapper lib over boto3 and aioboto3"
+readme = "README.md"
+license = { file = "LICENSE" }
+dependencies = [
+    "boto3>=1.37.1",
+    "aioboto3>=14.1.0"
+]
+requires-python = ">=3.0"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/Valery-Utukin/S3-lib"
+Issues = "https://github.com/Valery-Utukin/S3-lib"
