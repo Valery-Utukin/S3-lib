@@ -178,3 +178,8 @@ cython_debug/
 
 # Testing file
 test.py
+
+# Files to upload/download
+*.png
+*.jpg
+*.jpeg
