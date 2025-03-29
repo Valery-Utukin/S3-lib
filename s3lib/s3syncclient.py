@@ -1,9 +1,10 @@
 import boto3
 
 
-class S3SyncClient:
+class SyncS3Client:
     def __init__(
             self,
+            *,
             access_key: str,
             secret_key: str,
             endpoint_url: str,
@@ -25,11 +26,11 @@ class S3SyncClient:
 
     @bucket_name.setter
     def bucket_name(self, name: str) -> None:
-        print("bucket setter run")
-        if isinstance(name, str):
-            self._bucket_name = name
-        else:
+        if not isinstance(name, str):
             raise TypeError(f"Parameter 'bucket_name' must be string, not {type(name)}")
+        if not name.strip():
+            raise ValueError(f"Parameter 'bucket_name' must be not empty string")
+        self._bucket_name = name
 
     def download_entire_file(self, *, object_key: str, local_file: str) -> None:
         """
@@ -89,16 +90,10 @@ class S3SyncClient:
         else:
             raise TypeError(f"Parameter 'object_key' must be string, not {type(object_key)}")
 
-
     def upload_file(self, file_path: str) -> None:
         """
         Upload file to the currently using bucket
         """
         object_name = file_path.split("/")[-1]
 
-        with open(file_path, "rb") as file:
-            self.client.put_object(
-                Bucket=self.bucket_name,
-                Key=object_name,
-                Body=file,
-            )
+        self.client.upload_file(file_path, self.bucket_name, object_name)

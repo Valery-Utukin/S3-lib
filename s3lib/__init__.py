@@ -1,2 +1,2 @@
-from s3lib.s3syncclient import S3SyncClient
-from s3lib.s3asyncclient import S3AsyncClient
+from s3lib.s3syncclient import SyncS3Client
+from s3lib.s3asyncclient import AsyncS3Client
