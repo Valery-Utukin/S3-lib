@@ -82,24 +82,34 @@ class SyncS3Client:
         if not value.strip():
             raise ValueError(f"Parameter '{value_name}' must be non-empty string")
 
-    def copy_file(self, source_key: str, destination_key: str, destination_bucket: str = None) -> None:
+    def copy_file(
+            self,
+            *,
+            source_key: str,
+            destination_key: str = None,
+            destination_bucket: str = None
+    ) -> None:
         """
         Creates a copy of an object.
 
         :param source_key: Key of object to be copied.
         :type source_key: str
-        :param destination_key: Key of object copy. May go with folder prefix - test_folder/object_copy.txt.
-        :type destination_key: str
-        :param destination_bucket: Bucket name to copy to. If not specified uses the same bucket.
-        :type destination_bucket: str
-        :rtype: None
+        :param destination_key: Key of object copy. May contain folder prefix - test_folder/object_copy.txt.
+                                If not specified uses _copy postfix in object copy name.
+        :type destination_key: str | None
+        :param destination_bucket: Bucket name to copy to. If not specified uses current bucket.
+        :type destination_bucket: str | None
         :raises TypeError: If 'source_key', 'destination_key' or 'destination_bucket' are not str type.
         :raises ValueError: If 'source_key', 'destination_key' or 'destination_bucket' are empty string.
         """
         self._validate_str_param(value=source_key, value_name="source_key")
-        self._validate_str_param(value=destination_key, value_name="destination_key")
+        if destination_key is None:
+            source_list = [value for value in source_key.split(".")]  # Separate source_key -> ['text', 'pdf']
+            destination_key = f"{source_list[0]}_copy.{source_list[1]}"
+        else:
+            self._validate_str_param(value=destination_key, value_name="destination_key")
         if destination_bucket is None:
-            destination_bucket = self._bucket_name
+            destination_bucket = self.bucket_name
         else:
             self._validate_str_param(value=destination_bucket, value_name="destination_bucket")
 
@@ -113,6 +123,49 @@ class SyncS3Client:
             Bucket=destination_bucket,
             Key=destination_key
         )
+
+    def copy_file_prefix(
+            self,
+            *,
+            prefix: str,
+            destination_prefix: str = None,
+            destination_bucket: str = None
+    ) -> None:
+        """
+        Creates a copy of all objects that begin with specified prefix.
+
+        :param prefix: Prefix to search over objects to be copied.
+        :type prefix: str
+        :param destination_prefix: Prefix of object copies. Suppose to be a folder name for created copies
+                                   like test_folder/object_copy.txt. 'test_folder/' is destination prefix.
+                                   Copied objects will have _copy postfix. Must ends with '/'.
+                                   Otherwise, raise ValueError. If not specified uses _copy postfix and creates copies
+                                   in the root of current or given bucket.
+        :type destination_prefix: str | None
+        :param destination_bucket: Bucket name to copy to. If not specified uses current bucket.
+        :type destination_bucket: str | None
+        """
+        self._validate_str_param(value=prefix, value_name="prefix")
+        if destination_prefix is None:
+            destination_prefix = ""
+        else:
+            self._validate_str_param(value=destination_prefix, value_name=destination_prefix)
+            if not destination_prefix.endswith('/'):
+                raise ValueError(f"Parameter 'destination_prefix' must ends with '/': {destination_prefix}")
+        if destination_bucket is None:
+            destination_bucket = self.bucket_name
+        else:
+            self._validate_str_param(value=destination_bucket, value_name='destination_bucket')
+
+        object_prefix_list = self.get_keys_prefix(prefix)
+        for obj in object_prefix_list:
+            source_list = [value for value in obj.split(".")]  # Separate source_key -> ['text', 'pdf']
+            destination_key = destination_prefix + f"{source_list[0]}_copy.{source_list[1]}"
+            self.copy_file(
+                source_key=obj,
+                destination_key=destination_key,
+                destination_bucket=destination_bucket
+            )
 
     def download_entire_file(self, *, object_key: str, local_file: str) -> None:
         """
