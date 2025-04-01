@@ -2,6 +2,9 @@ import boto3
 
 
 class SyncS3Client:
+    """
+    Synchronous client for S3 storage.
+    """
     def __init__(
             self,
             *,
@@ -10,6 +13,24 @@ class SyncS3Client:
             endpoint_url: str,
             bucket_name: str,
     ):
+        """
+        Initialize synchronous client.
+
+        :param access_key: Access key to S3-storage.
+        :type access_key: str
+        :param secret_key: Secret access key to S3-storage.
+        :type secret_key: str
+        :param endpoint_url: An url link to S3 storage.
+        :type endpoint_url: str
+        :param bucket_name: The name of bucket inside S3-storage.
+        :type bucket_name: str
+        :raises TypeError: If any of args are not str type.
+        :raises ValueError: If any of args are empty strings.
+        """
+        self._validate_str_param(value=access_key, value_name="access_key")
+        self._validate_str_param(value=secret_key, value_name="secret_key")
+        self._validate_str_param(value=endpoint_url, value_name="endpoint_url")
+        self._validate_str_param(value=bucket_name, value_name="bucket_name")
         self.config = {
             "aws_access_key_id": access_key,
             "aws_secret_access_key": secret_key,
@@ -21,79 +42,174 @@ class SyncS3Client:
 
     @property
     def bucket_name(self) -> str:
-        """The name of currently using bucket"""
+        """
+        The name of currently using bucket.
+
+        :return: The name of currently using bucket.
+        :rtype: str
+        """
         return self._bucket_name
 
     @bucket_name.setter
     def bucket_name(self, name: str) -> None:
-        if not isinstance(name, str):
-            raise TypeError(f"Parameter 'bucket_name' must be string, not {type(name)}")
-        if not name.strip():
-            raise ValueError(f"Parameter 'bucket_name' must be not empty string")
+        """
+        Set current bucket name.
+
+        :param name: The name of bucket.
+        :type name: str
+        :rtype: None
+        :raises TypeError: If 'name' is not str type.
+        :raises ValueError: If 'name' is empty string.
+        """
+        self._validate_str_param(value=name, value_name="bucket_name")
         self._bucket_name = name
+
+    @staticmethod
+    def _validate_str_param(*, value: str, value_name: str) -> None:
+        """
+        Ensures given str has type str and non-empty. Otherwise, raise corresponding error.
+
+        :param value: String to be checked.
+        :type value: str
+        :param value_name: The name of string.
+        :type value_name: str
+        :rtype: None
+        :raises TypeError: If 'string' is not str type.
+        :raises ValueError: If 'string' is empty string.
+        """
+        if not isinstance(value, str):
+            raise TypeError(f"Parameter '{value_name}' must be string, not {type(value)}")
+        if not value.strip():
+            raise ValueError(f"Parameter '{value_name}' must be non-empty string")
+
+    def copy_file(self, source_key: str, destination_key: str, destination_bucket: str = None) -> None:
+        """
+        Creates a copy of an object.
+
+        :param source_key: Key of object to be copied.
+        :type source_key: str
+        :param destination_key: Key of object copy. May go with folder prefix - test_folder/object_copy.txt.
+        :type destination_key: str
+        :param destination_bucket: Bucket name to copy to. If not specified uses the same bucket.
+        :type destination_bucket: str
+        :rtype: None
+        :raises TypeError: If 'source_key', 'destination_key' or 'destination_bucket' are not str type.
+        :raises ValueError: If 'source_key', 'destination_key' or 'destination_bucket' are empty string.
+        """
+        self._validate_str_param(value=source_key, value_name="source_key")
+        self._validate_str_param(value=destination_key, value_name="destination_key")
+        if destination_bucket is None:
+            destination_bucket = self._bucket_name
+        else:
+            self._validate_str_param(value=destination_bucket, value_name="destination_bucket")
+
+        copy_source = {
+            "Bucket": self._bucket_name,
+            "Key": source_key
+        }
+
+        self.client.copy_object(
+            CopySource=copy_source,
+            Bucket=destination_bucket,
+            Key=destination_key
+        )
 
     def download_entire_file(self, *, object_key: str, local_file: str) -> None:
         """
-        Download file to the current working directory
+        Download file to the current working directory.
+
+        :param object_key: Key of object in S3-storage.
+        :type object_key: str
+        :param local_file: The name of downloaded file.
+        :type local_file: str
+        :rtype: None
+        :raises TypeError: If 'object_key' or 'local_file' are not str type.
+        :raises ValueError: If 'object_key' or 'local_file' are empty string.
         """
-        if isinstance(object_key, str) and isinstance(local_file, str):
-            self.client.download_file(self.bucket_name, object_key, local_file)
-        else:
-            raise TypeError(f"Parameters 'object_key' and 'local_file' must be string, "
-                            f"got {type(object_key)} and {type(local_file)}")
+        self._validate_str_param(value=object_key, value_name="object_key")
+        self._validate_str_param(value=local_file, value_name="local_file")
+
+        self.client.download_file(self.bucket_name, object_key, local_file)
 
     def generate_download_object_url(self, object_key: str) -> str:
         """
         Returns an url link for downloading the object
+
+        :param object_key: Key of object in S3-storage.
+        :type object_key: str
+        :return: The url link for downloading the file
+        :rtype: str
+        :raises TypeError: If 'object_key' is not str type.
+        :raises ValueError: If 'object_key' is empty string.
         """
-        if isinstance(object_key, str):
-            url = self.client.generate_presigned_url(
-                'get_object',
-                Params={'Bucket': self.bucket_name, 'Key': object_key},
-                ExpiresIn=3600
-            )
-            return url
-        else:
-            raise TypeError(f"Parameter 'object_key' must be string, not {type(object_key)}")
+        self._validate_str_param(value=object_key, value_name='object_key')
+        url = self.client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': self.bucket_name, 'Key': object_key},
+            ExpiresIn=3600
+        )
+        return url
 
     def get_keys_prefix(self, prefix: str = "") -> list[str]:
         """
         Returns a list of keys with given prefix. If prefix not given returns all keys up to 1000 objs.
+
+        :param prefix: Prefix to search over objects. Empty string by default ("").
+        :type prefix: str
+        :return: List of keys with specified prefix.
+        :rtype: list[str]
+        :raises TypeError: If given prefix is not str type.
         """
-        if isinstance(prefix, str):
-            response = self.client.list_objects_v2(Bucket=self.bucket_name, Prefix=prefix)
-            return [obj["Key"] for obj in response.get("Contents", [])]
-        else:
-            raise TypeError(f"Parameter 'prefix' must be string, not {type(prefix)}")
+        if prefix != "":
+            self._validate_str_param(value=prefix, value_name='prefix')
+        response = self.client.list_objects_v2(Bucket=self.bucket_name, Prefix=prefix)
+        return [obj["Key"] for obj in response.get("Contents", [])]
 
     def get_num_keys_prefix(self, prefix: str) -> int:
         """
         Returns a number of keys with given prefix.
+
+        :param prefix: Prefix to search over objects.
+        :type prefix: str
+        :return: The number of objects that begin with specified prefix.
+        :rtype: int
+        :raises TypeError: If 'prefix' is not str type.
+        :raises ValueError: If 'prefix' is empty string.
         """
-        if isinstance(prefix, str):
-            return len(self.get_keys_prefix(prefix=prefix))
-        else:
-            raise TypeError(f"Parameter 'prefix' must be string, not {type(prefix)}")
+        self._validate_str_param(value=prefix, value_name='prefix')
+        return len(self.get_keys_prefix(prefix=prefix))
 
     def get_file_size(self, object_key: str) -> int:
         """
-        Returns a size of object in bytes
+        Returns a size of object in bytes.
+
+        :param object_key: Key of object in S3-storage.
+        :type object_key: str
+        :return: The size of object in bytes
+        :rtype: int
+        :raises TypeError: If 'object_key' is not str type.
+        :raises ValueError: If 'object_key' is empty string.
         """
-        if isinstance(object_key, str):
-            metadata = self.client.get_object_attributes(
-                Bucket=self.bucket_name,
-                Key=object_key,
-                ObjectAttributes=['ObjectSize']
-            )
-            object_size = metadata.get('ObjectSize', 0)
-            return object_size
-        else:
-            raise TypeError(f"Parameter 'object_key' must be string, not {type(object_key)}")
+        self._validate_str_param(value=object_key, value_name='object_key')
+        metadata = self.client.get_object_attributes(
+            Bucket=self.bucket_name,
+            Key=object_key,
+            ObjectAttributes=['ObjectSize']
+        )
+        object_size = metadata.get('ObjectSize', 0)
+        return object_size
 
     def upload_file(self, file_path: str) -> None:
         """
-        Upload file to the currently using bucket
-        """
-        object_name = file_path.split("/")[-1]
+        Upload file to the currently using bucket. File name with extension (.jpg, .pdf etc.) will be used as a key
+        inside S3-storage.
 
+        :param file_path: Absolute or local path to uploaded file.
+        :type file_path: str
+        :rtype: None
+        :raises TypeError: If 'file_path' is not str type.
+        :raises ValueError: If 'file_path' is empty string.
+        """
+        self._validate_str_param(value=file_path, value_name='file_path')
+        object_name = file_path.split("/")[-1]
         self.client.upload_file(file_path, self.bucket_name, object_name)
