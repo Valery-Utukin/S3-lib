@@ -232,7 +232,7 @@ class SyncS3Client:
         self._validate_str_param(value=prefix, value_name='prefix')
         return len(self.get_keys_prefix(prefix=prefix))
 
-    def get_file_size(self, object_key: str) -> int:
+    def get_object_size(self, object_key: str) -> int:
         """
         Returns a size of object in bytes.
 
