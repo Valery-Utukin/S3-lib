@@ -1,4 +1,6 @@
 import boto3
+from botocore.exceptions import ClientError
+import os
 
 
 class SyncS3Client:
@@ -252,17 +254,93 @@ class SyncS3Client:
         object_size = metadata.get('ObjectSize', 0)
         return object_size
 
-    def upload_file(self, file_path: str) -> None:
+    def upload_file(
+            self,
+            *,
+            file_path: str,
+            object_key: str = None
+    ) -> None:
         """
-        Upload file to the currently using bucket. File name with extension (.jpg, .pdf etc.) will be used as a key
-        inside S3-storage.
+        Upload file to the current bucket.
 
         :param file_path: Absolute or local path to uploaded file.
         :type file_path: str
+        :param object_key: Key of object in S3-storage.
+        :type object_key: str | None
         :rtype: None
-        :raises TypeError: If 'file_path' is not str type.
-        :raises ValueError: If 'file_path' is empty string.
+        :raises TypeError: If 'file_path' or 'object_key' is not str type.
+        :raises ValueError: If 'file_path' or 'object_key' is empty string.
         """
         self._validate_str_param(value=file_path, value_name='file_path')
-        object_name = file_path.split("/")[-1]
-        self.client.upload_file(file_path, self.bucket_name, object_name)
+        if object_key is None:
+            object_key = file_path.split("/")[-1]
+        else:
+            self._validate_str_param(value=object_key, value_name='object_key')
+        self.client.upload_file(file_path, self.bucket_name, object_key)
+
+    def upload_file_multipart(
+            self,
+            *,
+            file_path: str,
+            object_key: str = None,
+    ) -> None:
+        """
+        Uploads file to the current bucket using multipart upload.
+        :param file_path: Absolute or local path to uploaded file.
+        :type file_path: str
+        :param object_key: Key of object in S3-storage.
+        :type object_key: str | None
+        :rtype: None
+        :raises TypeError: If 'file_path' or 'object_key' is not str type.
+        :raises ValueError: If 'file_path' or 'object_key' is empty string.
+        """
+        min_part_size = 5 * 1024 * 1024  # 5 MB - minimal chunk size (google "Amazon S3 multipart upload limits")
+        file_size = os.path.getsize(file_path)
+        if file_size < min_part_size:  # If file_size < 5 MB use self.upload_file()
+            self.upload_file(file_path=file_path, object_key=object_key)
+            return None
+        try:
+            if object_key is None:
+                object_key = file_path.split("/")[-1]
+            else:
+                self._validate_str_param(value=object_key, value_name='object_key')
+            res = self.client.create_multipart_upload(Bucket=self.bucket_name, Key=object_key)
+            upload_id = res['UploadId']
+
+            # Calculate optimal part size in bytes
+            # 10 000 - maximum amount of parts per upload
+            part_size = max(min_part_size, file_size // 10_000)
+
+            parts = []
+            part_number = 1
+            with open(file_path, 'rb') as f:
+                while part := f.read(part_size):
+                    part_response = self.client.upload_part(
+                        Bucket=self.bucket_name,
+                        Key=object_key,
+                        PartNumber=part_number,
+                        UploadId=upload_id,
+                        Body=part
+                    )
+                    parts.append({'PartNumber': part_number, 'ETag': part_response['ETag']})
+                    print(f"Part {part_number} uploaded. Size {len(part)} B")
+                    part_number += 1
+
+            self.client.complete_multipart_upload(
+                Bucket=self.bucket_name,
+                Key=object_key,
+                UploadId=upload_id,
+                MultipartUpload={'Parts': parts}
+            )
+            print("Файл успешно загружен по частям.")
+        except ClientError as e:
+            error_code = e.response['Error']['Code']
+            if error_code == "EntityTooSmall":
+                print("Somehow part_size < 5 MB")
+            else:
+                print(f"Unknown error: {e.response['Error']['Message']}")
+            self.client.abort_multipart_upload(
+                Bucket=self.bucket_name,
+                Key=object_key,
+                UploadId=upload_id
+            )
