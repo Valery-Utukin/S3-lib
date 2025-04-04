@@ -1,9 +1,10 @@
+import os
 import asyncio
-
 import aioboto3
-from contextlib import asynccontextmanager
 from asyncio import Lock
 from aiobotocore.config import AioConfig
+from botocore.exceptions import ClientError
+from contextlib import asynccontextmanager
 
 
 class AsyncS3Client:
@@ -285,18 +286,102 @@ class AsyncS3Client:
         async with self.lock:
             self._bucket_name = name
 
-    async def upload_file(self, file_path: str):
+    async def upload_file(
+            self,
+            *,
+            file_path: str,
+            object_key: str = None
+    ) -> None:
         """
-        Upload file to the currently using bucket. File name with extension (.jpg, .pdf etc.) will be used as a key
-        inside S3-storage.
+        Upload file to the current bucket.
 
         :param file_path: Absolute or local path to uploaded file.
         :type file_path: str
+        :param object_key: Key of object in S3-storage.
+        :type object_key: str | None
         :rtype: None
         :raises TypeError: If 'file_path' is not str type.
         :raises ValueError: If 'file_path' is empty string.
         """
         self._validate_str_param(value=file_path, value_name='file_path')
-        object_name = file_path.split("/")[-1]
+        if object_key is None:
+            object_key = file_path.split("/")[-1]
+        else:
+            self._validate_str_param(value=object_key, value_name='object_key')
         async with self.get_client() as s3:
-            await s3.upload_file(file_path, self._bucket_name, object_name)
+            await s3.upload_file(file_path, self._bucket_name, object_key)
+
+    @staticmethod
+    async def _read_file_chunks(file_path: str, part_size: int):
+        def read_chunks():
+            with open(file_path, "rb") as f:
+                while chunk := f.read(part_size):
+                    yield chunk
+
+        for chunk in await asyncio.to_thread(lambda: read_chunks()):
+            yield chunk
+
+    async def upload_file_multipart(
+            self,
+            *,
+            file_path: str,
+            object_key: str = None
+    ) -> None:
+        """
+        Uploads file to the current bucket using multipart upload.
+        :param file_path: Absolute or local path to uploaded file.
+        :type file_path: str
+        :param object_key: Key of object in S3-storage.
+        :type object_key: str | None
+        :rtype: None
+        :raises TypeError: If 'file_path' or 'object_key' is not str type.
+        :raises ValueError: If 'file_path' or 'object_key' is empty string.
+        """
+        min_part_size = 5 * 1024 * 1024  # 5 MB - minimal chunk size (google "Amazon S3 multipart upload limits")
+        file_size = os.path.getsize(file_path)
+        if file_size < min_part_size:  # If file_size < 5 MB use self.upload_file()
+            await self.upload_file(file_path=file_path, object_key=object_key)
+            return None
+        async with self.get_client() as s3:
+            try:
+                if object_key is None:
+                    object_key = file_path.split("/")[-1]
+                else:
+                    self._validate_str_param(value=object_key, value_name='object_key')
+
+                res = await s3.create_multipart_upload(Bucket=self.bucket_name, Key=object_key)
+                upload_id = res['UploadId']
+
+                # Calculate optimal part size in bytes
+                # 10 000 - maximum amount of parts per upload
+                part_size = max(min_part_size, file_size // 10_000)
+
+                parts = []
+                part_number = 1
+                async for chunk in self._read_file_chunks(file_path, part_size):
+                    response = await s3.upload_part(
+                        Bucket=self.bucket_name,
+                        Key=object_key,
+                        PartNumber=part_number,
+                        UploadId=upload_id,
+                        Body=chunk
+                    )
+                    parts.append({"ETag": response["ETag"], "PartNumber": part_number})
+                    part_number += 1
+                await s3.complete_multipart_upload(
+                    Bucket=self.bucket_name,
+                    Key=object_key,
+                    UploadId=upload_id,
+                    MultipartUpload={"Parts": parts},
+                )
+            except ClientError as e:
+                error_code = e.response['Error']['Code']
+                if error_code == "EntityTooSmall":
+                    print("Somehow part_size < 5 MB")
+                else:
+                    print(f"Unknown error: {e.response['Error']['Message']}")
+                await s3.abort_multipart_upload(
+                    Bucket=self.bucket_name,
+                    Key=object_key,
+                    UploadId=upload_id
+                )

@@ -323,7 +323,6 @@ class SyncS3Client:
                         Body=part
                     )
                     parts.append({'PartNumber': part_number, 'ETag': part_response['ETag']})
-                    print(f"Part {part_number} uploaded. Size {len(part)} B")
                     part_number += 1
 
             self.client.complete_multipart_upload(
@@ -332,7 +331,7 @@ class SyncS3Client:
                 UploadId=upload_id,
                 MultipartUpload={'Parts': parts}
             )
-            print("Файл успешно загружен по частям.")
+            print(f"File {object_key} multipart uploading finished!")
         except ClientError as e:
             error_code = e.response['Error']['Code']
             if error_code == "EntityTooSmall":
