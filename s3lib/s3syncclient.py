@@ -183,6 +183,21 @@ class SyncS3Client:
         if self.is_object_exists(object_key):
             self.client.delete_object(Bucket=self.bucket_name, Key=object_key)
 
+    def delete_object_prefix(self, prefix: str) -> None:
+        """
+        Deletes all objects with specified prefix.
+
+        :param prefix: Prefix to search objects to delete
+        :type prefix: str
+        :rtype: None
+        :raises TypeError: If 'object_key' or 'local_file' are not str type.
+        :raises ValueError: If 'object_key' or 'local_file' are empty string.
+        """
+        self._validate_str_param(value=prefix, value_name='prefix')
+        object_keys = self.get_keys_prefix(prefix)
+        for object_key in object_keys:
+            self.delete_object(object_key)
+
     def download_entire_file(self, *, object_key: str, local_file: str) -> None:
         """
         Download file to the current working directory.

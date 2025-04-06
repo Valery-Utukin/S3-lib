@@ -199,6 +199,24 @@ class AsyncS3Client:
             async with self.get_client() as s3:
                 await s3.delete_object(Bucket=self.bucket_name, Key=object_key)
 
+    async def delete_object_prefix(self, prefix: str) -> None:
+        """
+        Deletes all objects with specified prefix.
+
+        :param prefix: Prefix to search objects to delete
+        :type prefix: str
+        :rtype: None
+        :raises TypeError: If 'object_key' or 'local_file' are not str type.
+        :raises ValueError: If 'object_key' or 'local_file' are empty string.
+        """
+        self._validate_str_param(value=prefix, value_name='prefix')
+        object_keys = await self.get_keys_prefix(prefix)
+        tasks = []
+        for object_key in object_keys:
+            task = asyncio.create_task(self.delete_object(object_key))
+            tasks.append(task)
+        await asyncio.gather(*tasks)
+
     async def download_entire_file(self, object_key: str, local_file: str) -> None:
         """
         Download file to the current working directory.
