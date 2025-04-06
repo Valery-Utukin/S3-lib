@@ -222,7 +222,7 @@ class AsyncS3Client:
 
     async def get_keys_prefix(self, prefix: str = "") -> list[str]:
         """
-        Returns a list of keys with given prefix. If prefix not given returns all keys up to 1000 objs.
+        Returns a list of keys with given prefix. If prefix not given returns all keys.
 
         :param prefix: Prefix to search over objects. Empty string by default ("").
         :type prefix: str
@@ -232,9 +232,19 @@ class AsyncS3Client:
         """
         if prefix != "":
             self._validate_str_param(value=prefix, value_name='prefix')
+        keys = []
         async with self.get_client() as s3:
-            response = await s3.list_objects_v2(Bucket=self.bucket_name, Prefix=prefix)
-        return [obj["Key"] for obj in response.get("Contents", [])]
+            response = await s3.list_objects_v2(Bucket=self.bucket_name, Prefix=prefix, MaxKeys=100)
+        while response.get("Contents", []):
+            keys += [obj["Key"] for obj in response.get("Contents", [])]
+            async with self.get_client() as s3:
+                response = await s3.list_objects_v2(
+                    Bucket=self.bucket_name,
+                    Prefix=prefix,
+                    StartAfter=keys[-1],
+                    MaxKeys=100,
+                )
+        return keys
 
     async def get_num_keys_prefix(self, prefix: str) -> int:
         """
@@ -271,6 +281,21 @@ class AsyncS3Client:
             )
             object_size = metadata.get('ObjectSize', 0)
             return object_size
+
+    async def is_object_exists(self, object_key: str) -> bool:
+        """
+        Checks if object exists in the current bucket.
+
+        :param object_key: Key of object in S3-storage.
+        :type object_key: str
+        :return: True if object exists in current bucket. False if it doesn't.
+        :rtype: bool
+        :raises TypeError: If 'object_key' is not str type.
+        :raises ValueError: If 'object_key' is empty string.
+        """
+        self._validate_str_param(value=object_key, value_name='object_key')
+        object_keys = await self.get_keys_prefix()
+        return True if object_key in object_keys else False
 
     async def set_bucket_name(self, name: str) -> None:
         """
