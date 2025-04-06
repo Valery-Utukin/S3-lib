@@ -183,6 +183,22 @@ class AsyncS3Client:
             tasks.append(task)
         await asyncio.gather(*tasks)
 
+    async def delete_object(self, object_key: str) -> None:
+        """
+        Deletes an object from current bucket. If there is no such key in the bucket does nothing.
+
+        :param object_key: Key of object in S3-storage.
+        :type object_key: str
+        :rtype: None
+        :raises TypeError: If 'object_key' or 'local_file' are not str type.
+        :raises ValueError: If 'object_key' or 'local_file' are empty string.
+        """
+        self._validate_str_param(value=object_key, value_name='object_key')
+        is_exist = await self.is_object_exists(object_key)
+        if is_exist:
+            async with self.get_client() as s3:
+                await s3.delete_object(Bucket=self.bucket_name, Key=object_key)
+
     async def download_entire_file(self, object_key: str, local_file: str) -> None:
         """
         Download file to the current working directory.

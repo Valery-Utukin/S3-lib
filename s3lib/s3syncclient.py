@@ -169,6 +169,20 @@ class SyncS3Client:
                 destination_bucket=destination_bucket
             )
 
+    def delete_object(self, object_key: str) -> None:
+        """
+        Deletes an object from current bucket. If there is no such key in the bucket does nothing.
+
+        :param object_key: Key of object in S3-storage.
+        :type object_key: str
+        :rtype: None
+        :raises TypeError: If 'object_key' or 'local_file' are not str type.
+        :raises ValueError: If 'object_key' or 'local_file' are empty string.
+        """
+        self._validate_str_param(value=object_key, value_name='object_key')
+        if self.is_object_exists(object_key):
+            self.client.delete_object(Bucket=self.bucket_name, Key=object_key)
+
     def download_entire_file(self, *, object_key: str, local_file: str) -> None:
         """
         Download file to the current working directory.
