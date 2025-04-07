@@ -33,14 +33,14 @@ class AsyncS3Client:
         :raises TypeError: If any of args are not str type.
         :raises ValueError: If any of args are empty strings.
         """
-        self._validate_str_param(value=access_key, value_name="access_key")
-        self._validate_str_param(value=secret_key, value_name="secret_key")
-        self._validate_str_param(value=endpoint_url, value_name="endpoint_url")
+        self._validate_str_param(value=access_key, value_name='access_key')
+        self._validate_str_param(value=secret_key, value_name='secret_key')
+        self._validate_str_param(value=endpoint_url, value_name='endpoint_url')
         self._validate_str_param(value=bucket_name, value_name='bucket_name')
         self.config = {
-            "aws_access_key_id": access_key,
-            "aws_secret_access_key": secret_key,
-            "endpoint_url": endpoint_url
+            'aws_access_key_id': access_key,
+            'aws_secret_access_key': secret_key,
+            'endpoint_url': endpoint_url,
         }
 
         self._bucket_name = bucket_name
@@ -58,7 +58,7 @@ class AsyncS3Client:
         :return: Async S3 Client
         :rtype: aiobotocore.client.AioBaseClient
         """
-        async with self.session.client("s3", **self.config, config=self.s3_config) as client:
+        async with self.session.client('s3', **self.config, config=self.s3_config) as client:
             yield client
 
     @staticmethod
@@ -89,12 +89,12 @@ class AsyncS3Client:
         """
         return self._bucket_name
 
-    async def copy_file(
+    async def copy_object(
             self,
             *,
             source_key: str,
             destination_key: str = None,
-            destination_bucket: str = None
+            destination_bucket: str = None,
     ) -> None:
         """
         Creates a copy of an object.
@@ -109,20 +109,20 @@ class AsyncS3Client:
         :raises TypeError: If 'source_key', 'destination_key' or 'destination_bucket' are not str type.
         :raises ValueError: If 'source_key', 'destination_key' or 'destination_bucket' are empty string.
         """
-        self._validate_str_param(value=source_key, value_name="source_key")
+        self._validate_str_param(value=source_key, value_name='source_key')
         if destination_key is None:
-            source_list = [value for value in source_key.split(".")]  # Separate source_key -> ['text', 'pdf']
+            source_list = [value for value in source_key.split('.')]  # Separate source_key -> ['text', 'pdf']
             destination_key = f"{source_list[0]}_copy.{source_list[1]}"
         else:
-            self._validate_str_param(value=destination_key, value_name="destination_key")
+            self._validate_str_param(value=destination_key, value_name='destination_key')
         if destination_bucket is None:
             destination_bucket = self.bucket_name
         else:
-            self._validate_str_param(value=destination_bucket, value_name="destination_bucket")
+            self._validate_str_param(value=destination_bucket, value_name='destination_bucket')
 
         copy_source = {
-            "Bucket": self._bucket_name,
-            "Key": source_key
+            'Bucket': self._bucket_name,
+            'Key': source_key,
         }
 
         async with self.semaphore:
@@ -130,15 +130,16 @@ class AsyncS3Client:
                 await s3.copy_object(
                     CopySource=copy_source,
                     Bucket=destination_bucket,
-                    Key=destination_key
+                    Key=destination_key,
                 )
 
-    async def copy_file_prefix(
+    async def copy_object_prefix(
             self,
             *,
             prefix: str,
             destination_prefix: str = None,
-            destination_bucket: str = None
+            destination_bucket: str = None,
+            keep_original_name: bool = False,
     ) -> None:
         """
         Creates a copy of all objects that begin with specified prefix.
@@ -147,15 +148,25 @@ class AsyncS3Client:
         :type prefix: str
         :param destination_prefix: Prefix of object copies. Suppose to be a folder name for created copies
                                    like test_folder/object_copy.txt. 'test_folder/' is destination prefix.
-                                   Copied objects will have _copy postfix. Must ends with '/'.
-                                   Otherwise, raise ValueError. If not specified uses _copy postfix and creates copies
-                                   in the root of current or given bucket.
+                                   Copied objects will have _copy postfix
+                                   if parameter 'keep_original_names' is False. Must ends with '/'.
+                                   Otherwise, raise ValueError. If not specified uses _copy postfix
+                                   and creates copies in the root of current or given bucket.
         :type destination_prefix: str | None
         :param destination_bucket: Bucket name to copy to. If not specified uses current bucket.
         :type destination_bucket: str | None
-        :raises ValueError: If 'destination_prefix' does not end with backslash '/'.
+        :param keep_original_name: If True then copies will have the original names.
+                                   Uses only for move_object_prefix(). False by default.
+        :type keep_original_name: bool
+        :raises ValueError: If 'destination_prefix' does not end with backslash '/'. If 'destination_prefix'
+                            is not set (None) and 'keep_original_name' set to True.
         """
-        self._validate_str_param(value=prefix, value_name="prefix")
+        self._validate_str_param(value=prefix, value_name='prefix')
+        if destination_prefix is None and keep_original_name:
+            message = f"""If parameter 'destination_prefix' is None, copies cannot have the same names 
+            according to parameter 'keep_original_name'. Because copies suppose to be in the same directory.
+            Got 'destination_prefix' - {type(destination_prefix)} and 'keep_original_name' - {keep_original_name}."""
+            raise ValueError(message)
         if destination_prefix is None:
             destination_prefix = ""
         else:
@@ -169,21 +180,29 @@ class AsyncS3Client:
 
         object_prefix_list = await self.get_keys_prefix(prefix)
 
+        destination_keys = []
+        if keep_original_name:
+            for obj in object_prefix_list:
+                destination_keys.append(f"{destination_prefix}{obj}")
+        else:
+            for obj in object_prefix_list:
+                # Separate source_key -> ['text', 'pdf']
+                source_list = [value for value in obj.rsplit('.', 1)]
+                destination_keys.append(f"{destination_prefix}{source_list[0]}_copy.{source_list[1]}")
+
         tasks = []
-        for obj in object_prefix_list:
-            source_list = [value for value in obj.rsplit(".", 1)]  # Separate source_key -> ['text', 'pdf']
-            destination_key = f"{destination_prefix}{source_list[0]}_copy.{source_list[1]}"
+        for i, obj in enumerate(object_prefix_list):
             task = asyncio.create_task(
-                self.copy_file(
+                self.copy_object(
                     source_key=obj,
-                    destination_key=destination_key,
-                    destination_bucket=destination_bucket
+                    destination_key=destination_keys[i],
+                    destination_bucket=destination_bucket,
                 )
             )
             tasks.append(task)
         await asyncio.gather(*tasks)
 
-    async def delete_object(self, object_key: str) -> None:
+    async def delete_object(self, *, object_key: str) -> None:
         """
         Deletes an object from current bucket. If there is no such key in the bucket does nothing.
 
@@ -194,12 +213,12 @@ class AsyncS3Client:
         :raises ValueError: If 'object_key' or 'local_file' are empty string.
         """
         self._validate_str_param(value=object_key, value_name='object_key')
-        is_exist = await self.is_object_exists(object_key)
+        is_exist = await self.is_object_exist(object_key)
         if is_exist:
             async with self.get_client() as s3:
                 await s3.delete_object(Bucket=self.bucket_name, Key=object_key)
 
-    async def delete_object_prefix(self, prefix: str) -> None:
+    async def delete_object_prefix(self, *, prefix: str) -> None:
         """
         Deletes all objects with specified prefix.
 
@@ -213,11 +232,16 @@ class AsyncS3Client:
         object_keys = await self.get_keys_prefix(prefix)
         tasks = []
         for object_key in object_keys:
-            task = asyncio.create_task(self.delete_object(object_key))
+            task = asyncio.create_task(self.delete_object(object_key=object_key))
             tasks.append(task)
         await asyncio.gather(*tasks)
 
-    async def download_entire_file(self, object_key: str, local_file: str) -> None:
+    async def download_object(
+            self,
+            *,
+            object_key: str,
+            local_file: str,
+    ) -> None:
         """
         Download file to the current working directory.
 
@@ -234,7 +258,7 @@ class AsyncS3Client:
         async with self.get_client() as s3:
             await s3.download_file(self.bucket_name, object_key, local_file)
 
-    async def generate_download_object_url(self, object_key: str) -> str:
+    async def generate_download_object_url(self, *, object_key: str) -> str:
         """
         Returns an url link for downloading the object.
 
@@ -250,7 +274,7 @@ class AsyncS3Client:
             url = await s3.generate_presigned_url(
                 'get_object',
                 Params={'Bucket': self.bucket_name, 'Key': object_key},
-                ExpiresIn=3600
+                ExpiresIn=3600,
             )
         return url
 
@@ -269,8 +293,8 @@ class AsyncS3Client:
         keys = []
         async with self.get_client() as s3:
             response = await s3.list_objects_v2(Bucket=self.bucket_name, Prefix=prefix, MaxKeys=100)
-        while response.get("Contents", []):
-            keys += [obj["Key"] for obj in response.get("Contents", [])]
+        while response.get('Contents', []):
+            keys += [obj['Key'] for obj in response.get('Contents', [])]
             async with self.get_client() as s3:
                 response = await s3.list_objects_v2(
                     Bucket=self.bucket_name,
@@ -311,12 +335,12 @@ class AsyncS3Client:
             metadata = await s3.get_object_attributes(
                 Bucket=self.bucket_name,
                 Key=object_key,
-                ObjectAttributes=['ObjectSize']
+                ObjectAttributes=['ObjectSize'],
             )
             object_size = metadata.get('ObjectSize', 0)
             return object_size
 
-    async def is_object_exists(self, object_key: str) -> bool:
+    async def is_object_exist(self, object_key: str) -> bool:
         """
         Checks if object exists in the current bucket.
 
@@ -330,6 +354,66 @@ class AsyncS3Client:
         self._validate_str_param(value=object_key, value_name='object_key')
         object_keys = await self.get_keys_prefix()
         return True if object_key in object_keys else False
+
+    async def move_object(
+            self,
+            *,
+            object_key: str,
+            folder_name: str,
+    ) -> None:
+        """
+        Move an object to specified folder inside current bucket.
+        If there is no such folder, the one will be created.
+
+        :param object_key: Key of object in S3-storage.
+        :type object_key: str
+        :param folder_name: Folder name to move to. Must ends with backslash '/'.
+                            Otherwise, raise ValueError.
+        :type folder_name: str
+        :rtype: None
+        :raises TypeError: If 'object_key' or 'folder_name' is not str type.
+        :raises ValueError: If 'object_key' or 'folder_name' is empty string.
+                            If 'folder_name' not ends with backslash '/'.
+        """
+        self._validate_str_param(value=object_key, value_name='object_key')
+        self._validate_str_param(value=folder_name, value_name='folder_name')
+        if not folder_name.endswith('/'):
+            raise ValueError(f"Parameter 'folder_name' must ends with '/': {folder_name}")
+        if await self.is_object_exist(object_key=object_key):
+            destination_key = f"{folder_name}{object_key}"
+            await self.copy_object(source_key=object_key, destination_key=destination_key)
+            await self.delete_object(object_key=object_key)
+
+    async def move_object_prefix(
+            self,
+            *,
+            prefix: str,
+            folder_name: str,
+    ) -> None:
+        """
+        Move all objects with specified prefix to specified folder inside current bucket.
+        If there is no such folder, the one will be created.
+
+        :param prefix: Prefix to search over objects to move.
+        :type prefix: str
+        :param folder_name: Folder name to move to. Must ends with backslash '/'.
+                            Otherwise, raise ValueError.
+        :type folder_name: str
+        :rtype: None
+        :raises TypeError: If 'object_key' or 'folder_name' is not str type.
+        :raises ValueError: If 'object_key' or 'folder_name' is empty string.
+                            If 'folder_name' not ends with backslash '/'.
+        """
+        self._validate_str_param(value=prefix, value_name='prefix')
+        self._validate_str_param(value=folder_name, value_name='folder_name')
+        if not folder_name.endswith('/'):
+            raise ValueError(f"Parameter 'folder_name' must ends with '/': {folder_name}")
+        await self.copy_object_prefix(
+            prefix=prefix,
+            destination_prefix=folder_name,
+            keep_original_name=True,
+        )
+        await self.delete_object_prefix(prefix=prefix)
 
     async def set_bucket_name(self, name: str) -> None:
         """
@@ -349,7 +433,7 @@ class AsyncS3Client:
             self,
             *,
             file_path: str,
-            object_key: str = None
+            object_key: str = None,
     ) -> None:
         """
         Upload file to the current bucket.
@@ -373,7 +457,7 @@ class AsyncS3Client:
     @staticmethod
     async def _read_file_chunks(file_path: str, part_size: int):
         def read_chunks():
-            with open(file_path, "rb") as f:
+            with open(file_path, 'rb') as f:
                 while chunk := f.read(part_size):
                     yield chunk
 
@@ -384,7 +468,7 @@ class AsyncS3Client:
             self,
             *,
             file_path: str,
-            object_key: str = None
+            object_key: str = None,
     ) -> None:
         """
         Uploads file to the current bucket using multipart upload.
@@ -404,7 +488,7 @@ class AsyncS3Client:
         async with self.get_client() as s3:
             try:
                 if object_key is None:
-                    object_key = file_path.split("/")[-1]
+                    object_key = file_path.split('/')[-1]
                 else:
                     self._validate_str_param(value=object_key, value_name='object_key')
 
@@ -423,15 +507,15 @@ class AsyncS3Client:
                         Key=object_key,
                         PartNumber=part_number,
                         UploadId=upload_id,
-                        Body=chunk
+                        Body=chunk,
                     )
-                    parts.append({"ETag": response["ETag"], "PartNumber": part_number})
+                    parts.append({'ETag': response['ETag'], 'PartNumber': part_number})
                     part_number += 1
                 await s3.complete_multipart_upload(
                     Bucket=self.bucket_name,
                     Key=object_key,
                     UploadId=upload_id,
-                    MultipartUpload={"Parts": parts},
+                    MultipartUpload={'Parts': parts},
                 )
             except ClientError as e:
                 error_code = e.response['Error']['Code']

@@ -29,18 +29,18 @@ class SyncS3Client:
         :raises TypeError: If any of args are not str type.
         :raises ValueError: If any of args are empty strings.
         """
-        self._validate_str_param(value=access_key, value_name="access_key")
-        self._validate_str_param(value=secret_key, value_name="secret_key")
-        self._validate_str_param(value=endpoint_url, value_name="endpoint_url")
-        self._validate_str_param(value=bucket_name, value_name="bucket_name")
+        self._validate_str_param(value=access_key, value_name='access_key')
+        self._validate_str_param(value=secret_key, value_name='secret_key')
+        self._validate_str_param(value=endpoint_url, value_name='endpoint_url')
+        self._validate_str_param(value=bucket_name, value_name='bucket_name')
         self.config = {
-            "aws_access_key_id": access_key,
-            "aws_secret_access_key": secret_key,
-            "endpoint_url": endpoint_url
+            'aws_access_key_id': access_key,
+            'aws_secret_access_key': secret_key,
+            'endpoint_url': endpoint_url,
         }
         self.bucket_name = bucket_name
 
-        self.client = boto3.client("s3", **self.config)
+        self.client = boto3.client('s3', **self.config)
 
     @property
     def bucket_name(self) -> str:
@@ -63,7 +63,7 @@ class SyncS3Client:
         :raises TypeError: If 'name' is not str type.
         :raises ValueError: If 'name' is empty string.
         """
-        self._validate_str_param(value=name, value_name="bucket_name")
+        self._validate_str_param(value=name, value_name='bucket_name')
         self._bucket_name = name
 
     @staticmethod
@@ -84,12 +84,12 @@ class SyncS3Client:
         if not value.strip():
             raise ValueError(f"Parameter '{value_name}' must be non-empty string")
 
-    def copy_file(
+    def copy_object(
             self,
             *,
             source_key: str,
             destination_key: str = None,
-            destination_bucket: str = None
+            destination_bucket: str = None,
     ) -> None:
         """
         Creates a copy of an object.
@@ -104,34 +104,35 @@ class SyncS3Client:
         :raises TypeError: If 'source_key', 'destination_key' or 'destination_bucket' are not str type.
         :raises ValueError: If 'source_key', 'destination_key' or 'destination_bucket' are empty string.
         """
-        self._validate_str_param(value=source_key, value_name="source_key")
+        self._validate_str_param(value=source_key, value_name='source_key')
         if destination_key is None:
-            source_list = [value for value in source_key.split(".")]  # Separate source_key -> ['text', 'pdf']
+            source_list = [value for value in source_key.split('.')]  # Separate source_key -> ['text', 'pdf']
             destination_key = f"{source_list[0]}_copy.{source_list[1]}"
         else:
-            self._validate_str_param(value=destination_key, value_name="destination_key")
+            self._validate_str_param(value=destination_key, value_name='destination_key')
         if destination_bucket is None:
             destination_bucket = self.bucket_name
         else:
-            self._validate_str_param(value=destination_bucket, value_name="destination_bucket")
+            self._validate_str_param(value=destination_bucket, value_name='destination_bucket')
 
         copy_source = {
-            "Bucket": self._bucket_name,
-            "Key": source_key
+            'Bucket': self._bucket_name,
+            'Key': source_key,
         }
 
         self.client.copy_object(
             CopySource=copy_source,
             Bucket=destination_bucket,
-            Key=destination_key
+            Key=destination_key,
         )
 
-    def copy_file_prefix(
+    def copy_object_prefix(
             self,
             *,
             prefix: str,
             destination_prefix: str = None,
-            destination_bucket: str = None
+            destination_bucket: str = None,
+            keep_original_name: bool = False,
     ) -> None:
         """
         Creates a copy of all objects that begin with specified prefix.
@@ -141,13 +142,23 @@ class SyncS3Client:
         :param destination_prefix: Prefix of object copies. Suppose to be a folder name for created copies
                                    like test_folder/object_copy.txt. 'test_folder/' is destination prefix.
                                    Copied objects will have _copy postfix. Must ends with '/'.
-                                   Otherwise, raise ValueError. If not specified uses _copy postfix and creates copies
-                                   in the root of current or given bucket.
+                                   Otherwise, raise ValueError. If not specified uses _copy postfix
+                                   and creates copies in the root of current or given bucket.
         :type destination_prefix: str | None
         :param destination_bucket: Bucket name to copy to. If not specified uses current bucket.
         :type destination_bucket: str | None
+        :param keep_original_name: If True then copies will have the original names.
+                                   Uses only for move_object_prefix(). False by default.
+        :type keep_original_name: bool
+        :raises ValueError: If 'destination_prefix' does not end with backslash '/'. If 'destination_prefix'
+                            is not set (None) and 'keep_original_name' set to True.
         """
-        self._validate_str_param(value=prefix, value_name="prefix")
+        self._validate_str_param(value=prefix, value_name='prefix')
+        if destination_prefix is None and keep_original_name:
+            message = f"""If parameter 'destination_prefix' is None, copies cannot have the same names 
+            according to parameter 'keep_original_name'. Because copies suppose to be in the same directory.
+            Got 'destination_prefix' - {type(destination_prefix)} and 'keep_original_name' - {keep_original_name}."""
+            raise ValueError(message)
         if destination_prefix is None:
             destination_prefix = ""
         else:
@@ -159,19 +170,29 @@ class SyncS3Client:
         else:
             self._validate_str_param(value=destination_bucket, value_name='destination_bucket')
 
-        object_prefix_list = self.get_keys_prefix(prefix)
-        for obj in object_prefix_list:
-            source_list = [value for value in obj.split(".")]  # Separate source_key -> ['text', 'pdf']
-            destination_key = destination_prefix + f"{source_list[0]}_copy.{source_list[1]}"
-            self.copy_file(
+        object_prefix_list = self.get_keys_prefix(prefix=prefix)
+
+        destination_keys = []
+        if keep_original_name:
+            for obj in object_prefix_list:
+                destination_keys.append(f"{destination_prefix}{obj}")
+        else:
+            for obj in object_prefix_list:
+                # Separate source_key -> ['text', 'pdf']
+                source_list = [value for value in obj.rsplit('.', 1)]
+                destination_keys.append(f"{destination_prefix}{source_list[0]}_copy.{source_list[1]}")
+
+        for i, obj in enumerate(object_prefix_list):
+            self.copy_object(
                 source_key=obj,
-                destination_key=destination_key,
-                destination_bucket=destination_bucket
+                destination_key=destination_keys[i],
+                destination_bucket=destination_bucket,
             )
 
-    def delete_object(self, object_key: str) -> None:
+    def delete_object(self, *, object_key: str) -> None:
         """
-        Deletes an object from current bucket. If there is no such key in the bucket does nothing.
+        Deletes an object from current bucket.
+        If there is no such key in the bucket does nothing.
 
         :param object_key: Key of object in S3-storage.
         :type object_key: str
@@ -180,25 +201,30 @@ class SyncS3Client:
         :raises ValueError: If 'object_key' or 'local_file' are empty string.
         """
         self._validate_str_param(value=object_key, value_name='object_key')
-        if self.is_object_exists(object_key):
+        if self.is_object_exist(object_key=object_key):
             self.client.delete_object(Bucket=self.bucket_name, Key=object_key)
 
-    def delete_object_prefix(self, prefix: str) -> None:
+    def delete_object_prefix(self, *, prefix: str) -> None:
         """
         Deletes all objects with specified prefix.
 
-        :param prefix: Prefix to search objects to delete
+        :param prefix: Prefix to search objects to delete.
         :type prefix: str
         :rtype: None
         :raises TypeError: If 'object_key' or 'local_file' are not str type.
         :raises ValueError: If 'object_key' or 'local_file' are empty string.
         """
         self._validate_str_param(value=prefix, value_name='prefix')
-        object_keys = self.get_keys_prefix(prefix)
+        object_keys = self.get_keys_prefix(prefix=prefix)
         for object_key in object_keys:
-            self.delete_object(object_key)
+            self.delete_object(object_key=object_key)
 
-    def download_entire_file(self, *, object_key: str, local_file: str) -> None:
+    def download_object(
+            self,
+            *,
+            object_key: str,
+            local_file: str,
+    ) -> None:
         """
         Download file to the current working directory.
 
@@ -210,18 +236,18 @@ class SyncS3Client:
         :raises TypeError: If 'object_key' or 'local_file' are not str type.
         :raises ValueError: If 'object_key' or 'local_file' are empty string.
         """
-        self._validate_str_param(value=object_key, value_name="object_key")
-        self._validate_str_param(value=local_file, value_name="local_file")
+        self._validate_str_param(value=object_key, value_name='object_key')
+        self._validate_str_param(value=local_file, value_name='local_file')
 
         self.client.download_file(self.bucket_name, object_key, local_file)
 
-    def generate_download_object_url(self, object_key: str) -> str:
+    def generate_download_object_url(self, *, object_key: str) -> str:
         """
         Returns an url link for downloading the object
 
         :param object_key: Key of object in S3-storage.
         :type object_key: str
-        :return: The url link for downloading the file
+        :return: The url link for downloading the file.
         :rtype: str
         :raises TypeError: If 'object_key' is not str type.
         :raises ValueError: If 'object_key' is empty string.
@@ -230,11 +256,11 @@ class SyncS3Client:
         url = self.client.generate_presigned_url(
             'get_object',
             Params={'Bucket': self.bucket_name, 'Key': object_key},
-            ExpiresIn=3600
+            ExpiresIn=3600,
         )
         return url
 
-    def get_keys_prefix(self, prefix: str = "") -> list[str]:
+    def get_keys_prefix(self, *, prefix: str = "") -> list[str]:
         """
         Returns a list of keys with given prefix. If prefix not given returns all keys.
 
@@ -247,9 +273,13 @@ class SyncS3Client:
         if prefix != "":
             self._validate_str_param(value=prefix, value_name='prefix')
         keys = []
-        response = self.client.list_objects_v2(Bucket=self.bucket_name, Prefix=prefix, MaxKeys=100)
-        while response.get("Contents", []):
-            keys += [obj["Key"] for obj in response.get("Contents", [])]
+        response = self.client.list_objects_v2(
+            Bucket=self.bucket_name,
+            Prefix=prefix,
+            MaxKeys=100,
+        )
+        while response.get('Contents', []):
+            keys += [obj['Key'] for obj in response.get('Contents', [])]
             response = self.client.list_objects_v2(
                 Bucket=self.bucket_name,
                 Prefix=prefix,
@@ -258,7 +288,7 @@ class SyncS3Client:
             )
         return keys
 
-    def get_num_keys_prefix(self, prefix: str) -> int:
+    def get_num_keys_prefix(self, *, prefix: str) -> int:
         """
         Returns a number of keys with given prefix.
 
@@ -287,12 +317,12 @@ class SyncS3Client:
         metadata = self.client.get_object_attributes(
             Bucket=self.bucket_name,
             Key=object_key,
-            ObjectAttributes=['ObjectSize']
+            ObjectAttributes=['ObjectSize'],
         )
         object_size = metadata.get('ObjectSize', 0)
         return object_size
 
-    def is_object_exists(self, object_key: str) -> bool:
+    def is_object_exist(self, *, object_key: str) -> bool:
         """
         Checks if object exists in the current bucket.
 
@@ -307,11 +337,71 @@ class SyncS3Client:
         object_keys = self.get_keys_prefix()
         return True if object_key in object_keys else False
 
+    def move_object(
+            self,
+            *,
+            object_key: str,
+            folder_name: str,
+    ) -> None:
+        """
+        Move an object to specified folder inside current bucket.
+        If there is no such folder, the one will be created.
+
+        :param object_key: Key of object in S3-storage.
+        :type object_key: str
+        :param folder_name: Folder name to move to. Must ends with backslash '/'.
+                            Otherwise, raise ValueError.
+        :type folder_name: str
+        :rtype: None
+        :raises TypeError: If 'object_key' or 'folder_name' is not str type.
+        :raises ValueError: If 'object_key' or 'folder_name' is empty string.
+                            If 'folder_name' not ends with backslash '/'.
+        """
+        self._validate_str_param(value=object_key, value_name='object_key')
+        self._validate_str_param(value=folder_name, value_name='folder_name')
+        if not folder_name.endswith('/'):
+            raise ValueError(f"Parameter 'folder_name' must ends with '/': {folder_name}")
+        if self.is_object_exist(object_key=object_key):
+            destination_key = f"{folder_name}{object_key}"
+            self.copy_object(source_key=object_key, destination_key=destination_key)
+            self.delete_object(object_key=object_key)
+
+    def move_object_prefix(
+            self,
+            *,
+            prefix: str,
+            folder_name: str,
+    ) -> None:
+        """
+        Move all objects with specified prefix to specified folder inside current bucket.
+        If there is no such folder, the one will be created.
+
+        :param prefix: Prefix to search over objects to move.
+        :type prefix: str
+        :param folder_name: Folder name to move to. Must ends with backslash '/'.
+                            Otherwise, raise ValueError.
+        :type folder_name: str
+        :rtype: None
+        :raises TypeError: If 'object_key' or 'folder_name' is not str type.
+        :raises ValueError: If 'object_key' or 'folder_name' is empty string.
+                            If 'folder_name' not ends with backslash '/'.
+        """
+        self._validate_str_param(value=prefix, value_name='prefix')
+        self._validate_str_param(value=folder_name, value_name='folder_name')
+        if not folder_name.endswith('/'):
+            raise ValueError(f"Parameter 'folder_name' must ends with '/': {folder_name}")
+        self.copy_object_prefix(
+            prefix=prefix,
+            destination_prefix=folder_name,
+            keep_original_name=True,
+        )
+        self.delete_object_prefix(prefix=prefix)
+
     def upload_file(
             self,
             *,
             file_path: str,
-            object_key: str = None
+            object_key: str = None,
     ) -> None:
         """
         Upload file to the current bucket.
@@ -326,7 +416,7 @@ class SyncS3Client:
         """
         self._validate_str_param(value=file_path, value_name='file_path')
         if object_key is None:
-            object_key = file_path.split("/")[-1]
+            object_key = file_path.split('/')[-1]
         else:
             self._validate_str_param(value=object_key, value_name='object_key')
         self.client.upload_file(file_path, self.bucket_name, object_key)
@@ -354,7 +444,7 @@ class SyncS3Client:
             return None
         try:
             if object_key is None:
-                object_key = file_path.split("/")[-1]
+                object_key = file_path.split('/')[-1]
             else:
                 self._validate_str_param(value=object_key, value_name='object_key')
             res = self.client.create_multipart_upload(Bucket=self.bucket_name, Key=object_key)
@@ -373,7 +463,7 @@ class SyncS3Client:
                         Key=object_key,
                         PartNumber=part_number,
                         UploadId=upload_id,
-                        Body=part
+                        Body=part,
                     )
                     parts.append({'PartNumber': part_number, 'ETag': part_response['ETag']})
                     part_number += 1
@@ -382,7 +472,7 @@ class SyncS3Client:
                 Bucket=self.bucket_name,
                 Key=object_key,
                 UploadId=upload_id,
-                MultipartUpload={'Parts': parts}
+                MultipartUpload={'Parts': parts},
             )
             print(f"File {object_key} multipart uploading finished!")
         except ClientError as e:
@@ -394,5 +484,5 @@ class SyncS3Client:
             self.client.abort_multipart_upload(
                 Bucket=self.bucket_name,
                 Key=object_key,
-                UploadId=upload_id
+                UploadId=upload_id,
             )
